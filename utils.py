@@ -1,0 +1,1 @@
+TYPES=['[I]ntro/[E]xtra-vert', 'I[n]tuition/[S]ensing', '[T]hink/Feel', '[J]udge/[P]erceive']

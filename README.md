@@ -2,6 +2,11 @@
 
 - make use of the 4 individual markers and don't treat then type as different classes
 
+
+## Tokenizer
+
+- Roberta Tokenizer
+
 ## Model 1
 
 Have a loss for each type
