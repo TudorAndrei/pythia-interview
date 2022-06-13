@@ -1,7 +1,7 @@
 import glob
-import subprocess
 import logging as log
 import os
+import subprocess
 
 import pretty_errors
 from dotenv import dotenv_values
@@ -26,37 +26,47 @@ log.getLogger("pytorch_lightning").setLevel(log.WARNING)
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 seed_everything(42)
 
-
 PROJECT = "pythia-interview"
 BATCH_SIZE = 128
-NW = int(subprocess.check_output(['nproc', '--all']))
+NW = int(subprocess.check_output(["nproc", "--all"]))
 EPOCHS = 100
-web_hook = config["DISCORD"]
+WEB_HOOK = config["DISCORD"]
+MODEL_NAME = "transformer"
 
-model_name = "transformer"
+sweep_config = {
+    "method": "grid",
+    "metric": {"name": "val/f1_score", "goal": "maximize"},
+    "parameters": {
+        "emsize": {"values": [32, 64, 128]},
+        "d_hid": {"values": [32, 64, 128]},
+        "nlayers": {"values": [1, 2]},
+        "nhead": {"values": [1, 2, 4]},
+    },
+}
+
 params = {
     "batch_size": BATCH_SIZE,
     "num_workers": NW,
-    "model_name": model_name,
+    "model_name": MODEL_NAME,
     "tokenizer_path": "models/tokenizer",
-    # "tokenizer_path": model_name,
 }
 
-model_params = {
-    "ntokens": 30000,
-    "emsize": 128,
-    "d_hid": 128,
-    "nlayers": 2,
-    "nhead": 2,
-    "dropout": 0.2,
-}
-
-
-def loop():
+def sweep_iteration():
     wandb.init()
+
+    model_params = {
+        "ntokens": 30000,
+        "emsize": wandb.config.emsize,
+        "d_hid": wandb.config.d_hid,
+        "nlayers": wandb.config.nlayers,
+        "nhead": wandb.config.nhead,
+        "dropout": 0.2,
+    }
     logger = WandbLogger(save_dir="logs", project=PROJECT)
+
     dm = DataModule(data_path="data/mbti_processed.csv", **params)
-    # version = len(glob.glob(f"models/{model_name}*"))
+    version = len(glob.glob(f"models/{MODEL_NAME}*"))
+    wandb.run.name = f"{MODEL_NAME}_{version}"
     model = Transformer(**model_params)
     trainer = Trainer(
         # fast_dev_run=True,
@@ -65,13 +75,6 @@ def loop():
         logger=logger,
         max_epochs=EPOCHS,
         callbacks=[
-            # ModelCheckpoint(
-            #     monitor="val/loss",
-            #     mode="min",
-            #     dirpath=f"models/{model_name}_{version}", filename="model-{epoch:02d}-{val/loss:.2f}",
-            #     auto_insert_metric_name=False,
-            # ),
-            NotificationCallback(senders=[DiscordSender(webhook_url=web_hook)]),
             LearningRateMonitor(logging_interval="step"),
             EarlyStopping(monitor="val/loss", patience=15),
         ],
@@ -80,4 +83,5 @@ def loop():
 
 
 if __name__ == "__main__":
-    loop()
+    # sweep_id = wandb.sweep(sweep_config, project=PROJECT)
+    wandb.agent("jstpb4ql", project=PROJECT, function=sweep_iteration)
