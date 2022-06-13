@@ -1,26 +1,31 @@
 import os
-import pretty_errors
-import pandas as pd
 from typing import Optional
+
+import pandas as pd
+import pretty_errors
 import torch
 from pytorch_lightning import LightningDataModule
+from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Dataset, random_split
 from transformers import RobertaTokenizerFast
 from transformers.models.auto.tokenization_auto import AutoTokenizer
-from sklearn.model_selection import train_test_split
+
 from utils import TYPES, TYPES_DICT
+
 
 class BaseDataset(Dataset):
     def __init__(
         self,
         X_y,
         tokenizer_path: Optional[str] = None,
+        tokenizer_pretrained: Optional[str] = None,
     ):
         super().__init__()
         self.X, self.y = X_y
-        self.tokenizer = RobertaTokenizerFast.from_pretrained(
-            tokenizer_path
-        )
+        if tokenizer_path:
+            self.tokenizer = RobertaTokenizerFast.from_pretrained(tokenizer_path)
+        if tokenizer_pretrained:
+            self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 
     def get_label_array(self, idx):
         array = []
@@ -33,17 +38,18 @@ class BaseDataset(Dataset):
     def __getitem__(self, idx):
         text = self.X[idx]
         label = self.get_label_array(idx)
-        text = self.tokenizer.encode_plus(
+        # print(text)
+        text_encoded = self.tokenizer.encode_plus(
             text,
-            # add_special_tokens=True,
+            add_special_tokens=True,
             max_length=512,
             padding="max_length",
             return_tensors="pt",
-            return_attention_mask=False,
+            # return_attention_mask=True,
             truncation=True,
         )
         return {
-            "ids": torch.tensor(text["input_ids"], dtype=torch.long),
+            "ids": text_encoded["input_ids"].squeeze(),
             # "mask": torch.tensor(text["attention_mask"], dtype=torch.long),
             "labels": torch.tensor(label, dtype=torch.float),
         }
@@ -56,10 +62,10 @@ class DataModule(LightningDataModule):
     def __init__(
         self,
         data_path,
-        tokenizer_path: str = None,
+        tokenizer_path: str,
+        model_name: str,
         num_workers: int = 1,
         batch_size: int = 1,
-        model_name: str = None,
     ):
         super().__init__()
 
@@ -70,10 +76,17 @@ class DataModule(LightningDataModule):
         self.data = pd.read_csv(data_path)
 
     def setup(self, stage: Optional[str] = None) -> None:
-        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.data['posts'], self.data[TYPES], stratify=self.data[TYPES])
-        self.train_dataset = BaseDataset((self.X_train.values, self.y_train.reset_index(drop=True)), self.tokenizer_path)
-        self.test_dataset = BaseDataset((self.X_test.values, self.y_test.reset_index(drop=True)), self.tokenizer_path)
-
+        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(
+            self.data["posts"], self.data[TYPES], stratify=self.data[TYPES]
+        )
+        self.train_dataset = BaseDataset(
+            (self.X_train.values, self.y_train.reset_index(drop=True)),
+            self.tokenizer_path,
+        )
+        self.test_dataset = BaseDataset(
+            (self.X_test.values, self.y_test.reset_index(drop=True)),
+            self.tokenizer_path,
+        )
 
     def train_dataloader(self) -> DataLoader:
         return DataLoader(

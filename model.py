@@ -42,6 +42,7 @@ class TransformerModel(torch.nn.Module):
         d_hid: int,
         nlayers: int,
         d_out: int,
+        seq_len: int = 512,
         dropout: float = 0.5,
     ):
         super().__init__()
@@ -55,7 +56,7 @@ class TransformerModel(torch.nn.Module):
         self.transformer_encoder = TransformerEncoder(encoder_layers, nlayers)
         self.d_model = d_model
 
-        # self.decoder = Linear(d_model * seq_len, 1)
+        # self.decoder = Linear(d_model * seq_len, d_out)
         self.decoder = Linear(d_model, d_out)
 
         self.init_weights()
@@ -76,14 +77,10 @@ class TransformerModel(torch.nn.Module):
         """
         src = self.encoder(src) * math.sqrt(self.d_model)
         src = self.pos_encoder(src)
-        # print(src.shape)
         output = self.transformer_encoder(src)
-        # print(output.shape)
         # output = output.reshape(output.shape[0], -1)
         output = output.mean(dim=1)
-        # print(output.shape)
         output = self.decoder(output)
-        # print(output.shape)
         output = torch.squeeze(output)
         return output
 
@@ -97,12 +94,13 @@ class Transformer(LightningModule):
         nlayers=1,  # number of nn.TransformerEncoderLayer in nn.TransformerEncoder
         nhead=1,  # number of heads in nn.MultiheadAttention
         d_out=4,
+        seq_len=512,
         dropout=0.2,  # dropout probability
     ) -> None:
         super().__init__()
         self.save_hyperparameters()
         self.model = TransformerModel(
-            ntokens, emsize, nhead, d_hid, nlayers, d_out, dropout
+            ntokens, emsize, nhead, d_hid, nlayers, d_out, seq_len, dropout
         )
         self.criterion = BCEWithLogitsLoss()
         self.lr = 0.03
@@ -139,24 +137,27 @@ class Transformer(LightningModule):
             average="macro",
             num_classes=self.n_classes,
         )
-        self.log("train/loss", loss, prog_bar=True, on_epoch=True, on_step=False)
+        self.log("train/loss", loss, on_epoch=True, on_step=False)
         self.log("train/f1_score", f1, prog_bar=True, on_epoch=True, on_step=False)
 
     def validation_step(self, batch, _):
         ids, labels = batch["ids"], batch["labels"]
         output = self(ids)
         loss = self.criterion(output, labels)
-        return {"loss": loss, "outputs": torch.sigmoid(output), "labels": labels}
+        f1 = f1_score(
+            torch.sigmoid(output),
+            labels.int(),
+            average="none",
+            num_classes=self.n_classes,
+        )
+        return {"loss": loss, "f1": f1}
 
     def validation_epoch_end(self, out):
         loss = torch.stack([x["loss"] for x in out]).mean()
-        output = torch.cat([x["outputs"] for x in out])
-        labels = torch.cat([x["labels"] for x in out])
-        f1 = f1_score(
-            preds=output,
-            target=labels.int(),
-            average="macro",
-            num_classes=self.n_classes,
-        )
+        f1 = torch.stack([x["f1"] for x in out]).mean(dim=0).nan_to_num(0)
         self.log("val/loss", loss, prog_bar=True, on_epoch=True, on_step=False)
-        self.log("val/f1_score", f1, prog_bar=True, on_epoch=True, on_step=False)
+        self.log("val/f1_score", f1.mean(), prog_bar=True, on_epoch=True, on_step=False)
+        self.log("val/f1_IE", f1[0], on_epoch=True, on_step=False)
+        self.log("val/f1_NS", f1[1], on_epoch=True, on_step=False)
+        self.log("val/f1_TF", f1[2], on_epoch=True, on_step=False)
+        self.log("val/f1_JP", f1[3], on_epoch=True, on_step=False)

@@ -128,3 +128,5 @@ dmypy.json
 # Pyre type checker
 .pyre/
 mbti_processed.csv
+data/
+Session.vim
